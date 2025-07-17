@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Seesaw Moment Simulator</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #74ebd5, #acb6e5);
+            margin: 20px;
+            min-height: 100vh;
+            overflow: auto;
+        }
+        #simulator {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            padding: 20px;
+            width: 90%;
+            max-width: 700px;
+            margin: 0 auto;
+            text-align: center;
+            animation: fadeIn 1s ease-in;
+        }
+        canvas {
+            border: 2px solid #333;
+            border-radius: 10px;
+            background: #f0f8ff;
+            margin: 20px auto;
+            display: block;
+            width: 100%;
+            max-width: 600px;
+            height: 300px;
+        }
+        .controls {
+            display: flex;
+            justify-content: space-around;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .control-group {
+            background: #e8ecef;
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s;
+            flex: 1;
+            min-width: 180px;
+        }
+        .control-group:hover {
+            transform: translateY(-5px);
+        }
+        input, button {
+            padding: 8px;
+            margin: 5px;
+            border: none;
+            border-radius: 5px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        input[type="range"] {
+            width: 80px;
+        }
+        button {
+            background: #28a745;
+            color: white;
+        }
+        button:hover {
+            background: #218838;
+        }
+        .remove-btn {
+            background: #dc3545;
+        }
+        .remove-btn:hover {
+            background: #c82333;
+        }
+        .slider-value {
+            font-size: 12px;
+            color: #333;
+            margin-left: 8px;
+        }
+        #momentDisplay {
+            font-size: 16px;
+            margin-top: 20px;
+            color: #333;
+            background: #fff3cd;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: scale(0.9); }
+            to { opacity: 1; transform: scale(1); }
+        }
+        @media (max-width: 600px) {
+            .control-group {
+                min-width: 100%;
+            }
+            canvas {
+                height: 250px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div id="simulator">
+        <h1>Seesaw Moment Simulator</h1>
+        <canvas id="seesawCanvas"></canvas>
+        <div class="controls" id="controls">
+            <div class="control-group" id="weight1">
+                <h3>Weight 1</h3>
+                <label>Mass (kg): <input type="number" id="mass2" value="15" min="1" max="100"></label><br>
+                <label>Distance (m): <input type="range" id="distance2" min="-5" max="5" step="0.1" value="-3">
+                    <span class="slider-value" id="distance2Value">-3.0</span></label>
+            </div>
+            <div class="control-group" id="weight2">
+                <h3>Weight 2</h3>
+                <label>Mass (kg): <input type="number" id="mass1" value="10" min="1" max="100"></label><br>
+                <label>Distance (m): <input type="range" id="distance1" min="-5" max="5" step="0.1" value="2">
+                    <span class="slider-value" id="distance1Value">2.0</span></label>
+            </div>
+            <div class="control-group" id="pivot-controls">
+                <h3>Pivot</h3>
+                <label>Position (m): <input type="range" id="pivot" min="-2" max="2" step="0.1" value="0"></label><br>
+                <button onclick="addWeight()">Add Weight</button>
+                <button onclick="reset()">Reset</button>
+            </div>
+        </div>
+        <div id="momentDisplay">Moment calculations will appear here.</div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('seesawCanvas');
+        const ctx = canvas.getContext('2d');
+        const controls = document.getElementById('controls');
+        let weights = [
+            { massInput: document.getElementById('mass1'), distanceInput: document.getElementById('distance1'), distanceValue: document.getElementById('distance1Value'), mass: 10, distance: 2 },
+            { massInput: document.getElementById('mass2'), distanceInput: document.getElementById('distance2'), distanceValue: document.getElementById('distance2Value'), mass: 15, distance: -3 }
+        ];
+        const pivotInput = document.getElementById('pivot');
+        const momentDisplay = document.getElementById('momentDisplay');
+
+        let pivot = parseFloat(pivotInput.value);
+        let dragging = null;
+        let weightCount = 2;
+
+        // Set canvas size dynamically
+        function resizeCanvas() {
+            canvas.width = Math.min(600, window.innerWidth - 40);
+            canvas.height = canvas.width * 0.5;
+            draw();
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Draw ground
+            ctx.fillStyle = '#8b4513';
+            ctx.fillRect(0, canvas.height * 0.875, canvas.width, canvas.height * 0.125);
+
+            // Transform coordinates
+            ctx.save();
+            ctx.translate(canvas.width / 2, canvas.height / 2);
+
+            // Draw pivot (triangle)
+            ctx.fillStyle = '#555';
+            ctx.beginPath();
+            ctx.moveTo(pivot * 50, 50);
+            ctx.lineTo(pivot * 50 - 20, 100);
+            ctx.lineTo(pivot * 50 + 20, 100);
+            ctx.closePath();
+            ctx.fill();
+
+            // Calculate moments
+            const g = 10; // Simplified gravity
+            let netMoment = 0;
+            let momentText = '';
+            const colors = ['#ff4500', '#ffa500', '#00ff00'];
+
+            weights.forEach((weight, index) => {
+                const distanceFromPivot = weight.distance - pivot;
+                const moment = weight.mass * g * distanceFromPivot;
+                const direction = distanceFromPivot > 0 ? 'clockwise' : distanceFromPivot < 0 ? 'anticlockwise' : 'neutral';
+                netMoment += moment;
+                momentText += `Moment ${index + 1}: ${Math.abs(moment).toFixed(2)} Nm (${direction})<br>`;
+            });
+
+            const angle = Math.atan2(netMoment, 10000) * 10; // Scaled for visual effect
+            ctx.rotate(angle);
+
+            // Draw seesaw
+            ctx.fillStyle = '#4682b4';
+            ctx.fillRect(-canvas.width * 0.375, 0, canvas.width * 0.75, 20);
+
+            // Draw weights
+            weights.forEach((weight, index) => {
+                ctx.fillStyle = colors[index % colors.length];
+                ctx.fillRect(weight.distance * 50 - 25, -50, 50, 50);
+                ctx.fillStyle = '#000';
+                ctx.font = '14px Arial';
+                ctx.fillText(`${weight.mass} kg`, weight.distance * 50 - 20, -60);
+            });
+
+            ctx.restore();
+
+            // Update moment display
+            momentDisplay.innerHTML = `
+                ${momentText}
+                Net Moment: ${Math.abs(netMoment).toFixed(2)} Nm ${netMoment === 0 ? '' : netMoment > 0 ? '(clockwise)' : '(anticlockwise)'}<br>
+                Seesaw is ${netMoment === 0 ? 'balanced' : netMoment > 0 ? 'tilting clockwise' : 'tilting anticlockwise'}.
+            `;
+        }
+
+        function updateValues() {
+            weights.forEach(weight => {
+                weight.mass = parseFloat(weight.massInput.value);
+                weight.distance = parseFloat(weight.distanceInput.value);
+                weight.distanceValue.textContent = weight.distance.toFixed(1);
+            });
+            pivot = parseFloat(pivotInput.value);
+            draw();
+        }
+
+        function addWeight() {
+            if (weightCount >= 3) return; // Limit to 3 weights
+            weightCount++;
+            const newWeightId = `weight${weightCount}`;
+            const controlGroup = document.createElement('div');
+            controlGroup.className = 'control-group';
+            controlGroup.id = newWeightId;
+            controlGroup.innerHTML = `
+                <h3>Weight ${weightCount}</h3>
+                <label>Mass (kg): <input type="number" id="mass${weightCount}" value="5" min="1" max="100"></label><br>
+                <label>Distance (m): <input type="range" id="distance${weightCount}" min="-5" max="5" step="0.1" value="1">
+                    <span class="slider-value" id="distance${weightCount}Value">1.0</span></label><br>
+                <button class="remove-btn" onclick="removeWeight('${newWeightId}')">Remove</button>
+            `;
+            controls.insertBefore(controlGroup, document.getElementById('pivot-controls'));
+
+            const newWeight = {
+                massInput: document.getElementById(`mass${weightCount}`),
+                distanceInput: document.getElementById(`distance${weightCount}`),
+                distanceValue: document.getElementById(`distance${weightCount}Value`),
+                mass: 5,
+                distance: 1
+            };
+            weights.push(newWeight);
+            newWeight.massInput.addEventListener('input', updateValues);
+            newWeight.distanceInput.addEventListener('input', updateValues);
+            updateValues();
+        }
+
+        function removeWeight(id) {
+            const index = parseInt(id.replace('weight', '')) - 1;
+            weights.splice(index, 1);
+            document.getElementById(id).remove();
+            weightCount--;
+            updateValues();
+        }
+
+        function reset() {
+            while (weightCount > 2) {
+                removeWeight(`weight${weightCount}`);
+            }
+            weights[0].massInput.value = 10;
+            weights[0].distanceInput.value = 2;
+            weights[1].massInput.value = 15;
+            weights[1].distanceInput.value = -3;
+            pivotInput.value = 0;
+            updateValues();
+        }
+
+        // Dragging weights
+        canvas.addEventListener('mousedown', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = (e.clientX - rect.left - canvas.width / 2) / 50;
+            const y = (e.clientY - rect.top - canvas.height / 2) / 50;
+
+            weights.forEach((weight, index) => {
+                if (Math.abs(x - weight.distance) < 0.5 && y > -1 && y < 0) {
+                    dragging = index;
+                }
+            });
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (dragging !== null) {
+                const rect = canvas.getBoundingClientRect();
+                const x = (e.clientX - rect.left - canvas.width / 2) / 50;
+                weights[dragging].distance = Math.max(-5, Math.min(5, x));
+                weights[dragging].distanceInput.value = weights[dragging].distance.toFixed(1);
+                updateValues();
+            }
+        });
+
+        canvas.addEventListener('mouseup', () => {
+            dragging = null;
+        });
+
+        // Event listeners
+        weights.forEach(weight => {
+            weight.massInput.addEventListener('input', updateValues);
+            weight.distanceInput.addEventListener('input', updateValues);
+        });
+        pivotInput.addEventListener('input', updateValues);
+    </script>
+</body>
+</html>
